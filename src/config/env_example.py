@@ -14,3 +14,6 @@ DB_PARAMS = {
     'password': '',
     'port': '5432'
 }
+
+# Filestore
+FILESTORE_PATH = ''

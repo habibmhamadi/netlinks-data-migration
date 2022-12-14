@@ -6,6 +6,7 @@ db, cr, odoo, O_DB, O_UID, O_PWD = init_connection()
 
 archieved_condition = ['|', ['active', '=', True], ['active', '=', False]]
 
+from config.env import FILESTORE_PATH
 
 # HR Department
 def get_departments():
@@ -15,14 +16,17 @@ def get_departments():
             name,
             active,
             parent_id,
-            manager_id
+            manager_id,
+            company_id
         FROM
             hr_department
         WHERE
             id > 2
+        AND
+            company_id = 1 or company_id is null
         ORDER BY
             parent_id NULLS FIRST""")
-    return [{'old_id': dep[0], 'name':dep[1], 'active':dep[2]} for dep in cr.fetchall()]
+    return [{'old_id': dep[0], 'name':dep[1], 'active':dep[2], 'company_id': 1} for dep in cr.fetchall()]
 
 
 # HR Employee
@@ -56,37 +60,40 @@ def get_employees():
             mother_name,
             current_address,
             permanent_address,
-            birthday,
+            birthday::TEXT,
             place_of_birth::TEXT,
             gender,
             marital,
             children,
             completed_police_clearance,
-            completed_pikaz_clearance
-            company_id
+            completed_pikaz_clearance,
+            company_id,
+            active
         FROM
             hr_employee
         WHERE
             id > 1
+        AND
+            company_id = 1
         ORDER BY
-            parent_id, coach_id NULLS FIRST""")
+            parent_id NULLS FIRST, id""")
 
     return [{
         'old_id': emp[0],
         'name': emp[1],
         'idc_no': emp[2],
-        'address_id': emp[3],
+        'address_id': None,
         'fingerprint_id': emp[4],
         'join_date': emp[5],
         'personal_mobile': emp[6],
         'personal_email': emp[7],
         'work_email': emp[8],
         'work_phone': emp[9],
-        'coach_id': emp[10],
-        'parent_id': emp[11],
+        'coach_id': None,
+        'parent_id': None,
         'department_id': emp[12],
         'job_id': emp[13],
-        'resource_calendar_id': emp[14],
+        'resource_calendar_id': 1,
         'country_id': emp[15],
         'identification_id': emp[16],
         'passport_id': emp[17],
@@ -107,6 +114,7 @@ def get_employees():
         'completed_police_clearance': emp[32],
         'completed_pikaz_clearance':emp[33],
         'company_id':emp[34],
+        'active': emp[35]
     } for emp in cr.fetchall()]
 
 
@@ -167,11 +175,14 @@ def insert_part_1():
     cr.execute("""
         SELECT
             id,
-            name
+            name,
+            company_id
         FROM
-            hr_job""")
+            hr_job
+        WHERE company_id = 1 or company_id is null
+            """)
 
-    jobs = [{'old_id': job[0], 'name':job[1]} for job in cr.fetchall()]
+    jobs = [{'old_id': job[0], 'name':job[1], 'company_id': 1} for job in cr.fetchall()]
     try:
         odoo.execute_kw(O_DB, O_UID, O_PWD, 'res.company', 'write', [[1], company])
     except Exception as e:
@@ -184,7 +195,7 @@ def insert_part_1():
 
 def insert_part_2():
     emps = get_employees()
-    for emp in emps:
+    for index, emp in enumerate(emps):
         if emp.get('department_id'):
             department_id = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.department', 'search', [[['old_id', '=', emp.get('department_id')], *archieved_condition]])
             if department_id:
@@ -193,12 +204,17 @@ def insert_part_2():
             job_id = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.job', 'search', [[['old_id', '=', emp.get('job_id')]]])
             if job_id:
                 emp.update({'job_id': job_id[0]})
-        if emp.get('address_id'):
-            if not odoo.execute_kw(O_DB, O_UID, O_PWD, 'res.partner', 'search', [[['id', '=', emp.get('address_id')], *archieved_condition]]):
-                emp.update({'address_id': None})
-    odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'create', [emps])
+        # if emp.get('address_id'):
+        #     if not odoo.execute_kw(O_DB, O_UID, O_PWD, 'res.partner', 'search', [[['id', '=', emp.get('address_id')], *archieved_condition]]):
+        #         emp.update({'address_id': None})
+        try:
+            odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'create', [emp])
+            print(f'{index+1} / {len(emps)}')
+        except Exception as e:
+            print(' =====> ',e, '\n', emp)
+            break
     print('*** Migration 2 Success ***')
-    
+
 
 def insert_part_3():
     deps = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.department', 'search_read', [[['old_id', 'in', [dep.get('old_id') for dep in get_departments()]], *archieved_condition]])
@@ -216,7 +232,7 @@ def insert_part_3():
             if new_parent_id:
                 new_parent_id = new_parent_id[0]
         odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.department', 'write', [[dep.get('id')], {'manager_id': new_manager_id, 'parent_id': new_parent_id}])
-        print(f'{index+1}/{len(deps)}')
+        print(f'{index+1} / {len(deps)}')
         
 
     emps = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'search_read', [[['old_id', 'in', [emp.get('old_id') for emp in get_employees()]], *archieved_condition]])
@@ -234,7 +250,7 @@ def insert_part_3():
             if new_parent_id:
                 new_parent_id = new_parent_id[0]
         odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'write', [[emp.get('id')], {'coach_id': new_coach_id, 'parent_id': new_parent_id}])
-        print(f'{index+1}/{len(emps)}')
+        print(f'{index+1} / {len(emps)}')
     print('*** Migration 3 Success ***')
     
 
@@ -254,6 +270,8 @@ def insert_part_4():
             )
         FROM
             emergency_contacts
+        WHERE
+            name is not null
         GROUP BY
             contacts""")
     emergency_contacts = [{'old_emp_id': emg[0], 'contacts': [{
@@ -262,13 +280,15 @@ def insert_part_4():
                             'number': contact.get('number'),
                           } for contact in emg[1]]} for emg in cr.fetchall()]
 
-
+    index = 1
     for emp in emergency_contacts:
         if emp.get('contacts'):
             emp_id = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'search', [[['old_id', '=', emp.get('old_emp_id')], *archieved_condition]])
             if emp_id:
                 contacts = list(map(lambda x: {**x, **{'contact_id': emp_id[0]}}, emp.get('contacts')))
                 odoo.execute_kw(O_DB, O_UID, O_PWD, 'emergency.contact', 'create', [contacts])
+                print(f'{index}')
+                index+=1
 
 
     # Employee Reference
@@ -287,6 +307,8 @@ def insert_part_4():
             )
         FROM
             employee_references
+        WHERE
+            name is not null
         GROUP BY
             empl_id""")
     emp_references = [{'old_emp_id': emg[0], 'references': [{
@@ -297,13 +319,15 @@ def insert_part_4():
                             'email': ref.get('email'),
                             'checked': ref.get('checked'),
                           } for ref in emg[1]]} for emg in cr.fetchall()]
-
+    index = 1
     for emp in emp_references:
         if emp.get('references'):
             emp_id = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'search', [[['old_id', '=', emp.get('old_emp_id')], *archieved_condition]])
             if emp_id:
                 refs = list(map(lambda x: {**x, **{'employee_id': emp_id[0]}} , emp.get('references')))
                 odoo.execute_kw(O_DB, O_UID, O_PWD, 'employee.reference', 'create', [refs])
+                print(f'{index}')
+                index+=1
 
     print('*** Migration 4 Success ***')
     
@@ -316,13 +340,13 @@ def insert_part_5():
         byte_data = None
         if f_name:
             try:
-                file = open(f'filestore/{f_name[0]}', "rb")
+                file = open(f'{FILESTORE_PATH}/{f_name[0]}', "rb")
                 byte_data = base64.b64encode(file.read()).decode('utf-8')
             except Exception as e:
                 print(f"ERROR reading attachment for employee {emp.get('id')}", e)
         if byte_data:
             odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.employee', 'write', [[emp.get('id')], {'image_1920': byte_data}])
-        print(f'{index+1}/{len(emp_ids)}')
+        print(f'{index+1} / {len(emp_ids)}')
     print('*** Migration 5 Success ***')
 
 
@@ -332,11 +356,13 @@ def insert_part_6():
             doc.emp_id,
             json_agg(json_build_object('name', doc.file_name, 'file', att.store_fname))
         FROM 
-            employee_document doc INNER JOIN ir_attachment att ON att.res_id = doc.id
+            employee_document doc INNER JOIN ir_attachment att ON att.res_id = doc.id INNER JOIN hr_employee emp ON emp.id = doc.emp_id
         WHERE
             att.res_model = 'employee.document'
         AND
             att.res_field = 'name'
+        AND
+            emp.company_id = 1
         GROUP BY
             doc.emp_id
     """)
@@ -348,7 +374,7 @@ def insert_part_6():
             for doc in rec[1]:
                 byte_data = None
                 try:
-                    file = open(f"filestore/{doc.get('file')}", "rb")
+                    file = open(f"{FILESTORE_PATH}/{doc.get('file')}", "rb")
                     byte_data = base64.b64encode(file.read()).decode('utf-8')
                     odoo.execute_kw(O_DB, O_UID, O_PWD, 'employee.document', 'create', [{'employee_id': emp.get('id'), 'name': doc.get('name'), 'document': byte_data}])
                 except Exception as e:

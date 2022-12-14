@@ -6,12 +6,11 @@ db, cr, odoo, O_DB, O_UID, O_PWD = init_connection()
 
 archieved_condition = ['|', ['active', '=', True], ['active', '=', False]]
 
+from config.env import FILESTORE_PATH
+
 
 
 def insert_1():
-
-    cr.execute("SELECT contract_signatory FROM res_company LIMIT 1")
-    contract_signatory_id = cr.fetchone()[0]
 
     cr.execute("""
         SELECT
@@ -26,22 +25,21 @@ def insert_1():
             kanban_state,
             date_generated_from::date::TEXT,
             date_generated_to::date::TEXT,
-            vacancy_number,
-            duration,
             job_summary,
             legal_leave,
             sick_leave,
-            transportation,
-            second_shift,
-            site_lunch_allowance,
-            wage,
+            transportation::integer,
+            second_shift::integer,
+            site_lunch_allowance::integer,
+            wage::integer,
             state,
-            contract_signatory,
             structure_type_id,
             department_id,
             job_id
         FROM
             hr_contract
+        WHERE
+            company_id = 1
         ORDER BY
             id
     """)
@@ -58,20 +56,17 @@ def insert_1():
         'kanban_state': con[8],
         'date_generated_from': con[9],
         'date_generated_to': con[10],
-        'vacancy_number': con[11],
-        'duration': con[12],
-        'job_summary': con[13],
-        'legal_leave': con[14],
-        'sick_leave': con[15],
-        'transportation': con[16],
-        'second_shift': con[17],
-        'site_lunch_allowance': con[18],
-        'wage': con[19],
-        'state': con[20],
-        'contract_signatory': contract_signatory_id,
-        'structure_type_id': con[22],
-        'department_id': con[23],
-        'job_id': con[24],
+        'job_summary': con[11],
+        'legal_leave': con[12],
+        'sick_leave': con[13],
+        'transportation': con[14],
+        'second_shift': con[15],
+        'site_lunch_allowance': con[16],
+        'wage': con[17],
+        'state': con[18],
+        'structure_type_id': con[19],
+        'department_id': con[20],
+        'job_id': con[21],
         'contract_approver': 2,
 
     } for con in cr.fetchall()]
@@ -88,9 +83,7 @@ def insert_1():
             con.update({'job_id': job and job[0] or False})
 
             odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.contract', 'create', [con])
-            print(f'{index+1}/{len(db_contracts)}')
-
-
+            print(f'{index+1} / {len(db_contracts)}')
 
 
 
@@ -98,11 +91,13 @@ def insert_2():
     cr.execute("""
         SELECT
             res_id,
-            json_agg(json_build_object('name', name, 'path', store_fname))
+            json_agg(json_build_object('name', att.name, 'path', att.store_fname))
         FROM
-            ir_attachment
+            ir_attachment att INNER JOIN hr_contract con ON con.id = att.res_id
         WHERE
             res_model = 'hr.contract'
+        AND
+            con.company_id = 1
         GROUP BY
             res_id
         ORDER BY
@@ -113,7 +108,7 @@ def insert_2():
         contract_id = odoo.execute_kw(O_DB, O_UID, O_PWD, 'hr.contract', 'search', [[['old_id', '=', rec[0]], *archieved_condition]])
         for att in rec[1]:
             try:
-                file = open(f"filestore/{att.get('path')}", "rb")
+                file = open(f"{FILESTORE_PATH}/{att.get('path')}", "rb")
                 odoo.execute_kw(O_DB, O_UID, O_PWD, 'ir.attachment', 'create', [{
                     'res_id': contract_id[0],
                     'res_model': 'hr.contract',
@@ -122,7 +117,7 @@ def insert_2():
                 }])
             except Exception as e:
                 print('Error writing attachment', e)
-        print(f'{index+1}/{len(db_attachments)}')
+        print(f'{index+1} / {len(db_attachments)}')
 
 # Run each one separately (All others should be commented each time)
 
